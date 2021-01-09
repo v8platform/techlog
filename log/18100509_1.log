@@ -1,38 +1,5 @@
-package techlog
 
-import (
-	"reflect"
-	"testing"
-	"time"
-)
-
-func Test_parseTechData(t *testing.T) {
-	type args struct {
-		data []byte
-	}
-	tests := []struct {
-		name string
-		args args
-		want []Event
-	}{
-		{"simple parser",
-			args{data: []byte(t1)},
-			[]Event{},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := parseChunkData(tt.args.data, time.Now()); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("parseTechData() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-var t2 = `01:33.503039-0,SDBL,6,process=rphost,p:processName=MyTempDbHost,OSThread=2424,t:clientID=45,t:applicationName=1CV8C,t:computerName=YY-COMP,t:connectID=11,SessionID=20,Usr=DefUser,AppID=1CV8C,DBMS=DBMSSQL,DataBase=YY-COMP\MyTempDbHost,Trans=1,Func=BeginTransaction,Context='Форма.Вызов : ВнешняяОбработка.ТестированиеТехнологическогоЖурнала.Форма.Форма.Модуль.ВыполнениеЗапросаSDBLНаСервере
-ВнешняяОбработка.ТестированиеТехнологическогоЖурнала.Форма.Форма.Форма : 89 : НачатьТранзакцию();'`
-
-var t1 = `29:40.227023-0,EXCP,4,process=rphost,p:processName=MyTempDbHost,OSThread=2840,t:clientID=12,t:applicationName=1CV8C,t:computerName=YY-COMP,t:connectID=4,SessionID=15,Usr=DefUser,AppID=1CV8C,Exception=580392e6-ba49-4280-ac67-fcd6f2180121,Descr='src\VResourceInfoBaseImpl.cpp(1129):
+29:40.227023-200000213,EXCP,4,process=rphost,p:processName=MyTempDbHost,OSThread=2840,t:clientID=12,t:applicationName=1CV8C,t:computerName=YY-COMP,t:connectID=4,SessionID=15,Usr=DefUser,AppID=1CV8C,Exception=580392e6-ba49-4280-ac67-fcd6f2180121,Descr='src\VResourceInfoBaseImpl.cpp(1129):
 580392e6-ba49-4280-ac67-fcd6f2180121: Неспецифицированная ошибка работы с ресурсом
 Ошибка при выполнении запроса POST к ресурсу /e1cib/logForm:
 8d366056-4d5a-4d88-a207-0ae535b7d28e: Ошибка при вызове метода контекста (Выполнить)
@@ -115,4 +82,3 @@ p_0: 'Тест'
 ВнешняяОбработка.ТестированиеТехнологическогоЖурнала.Форма.Форма.Форма : 148 : Набор.Прочитать();'
 11:15.624051-3,TLOCK,4,process=rphost,p:processName=MyTempDbHost,OSThread=19392,t:clientID=28,t:applicationName=1CV8C,t:computerName=YY-COMP,t:connectID=8,SessionID=23,Usr=DefUser,AppID=1CV8C,DBMS=DBMSSQL,DataBase=YY-COMP\MyTempDbHost,Regions=InfoRg49.DIMS,Locks='InfoRg49.DIMS Exclusive Fld50=47:b681d8f2ca20664b11eae1169d5aadc6',WaitConnections=,Context='Форма.Вызов : ВнешняяОбработка.ТестированиеТехнологическогоЖурнала.Форма.Форма.Модуль.ПростаяУправляемаяБлокировкаНаСервере
 ВнешняяОбработка.ТестированиеТехнологическогоЖурнала.Форма.Форма.Форма : 150 : Набор.Записать();'
-`

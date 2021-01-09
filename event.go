@@ -2,7 +2,6 @@ package techlog
 
 import (
 	"bytes"
-	"github.com/k0kubun/pp"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,23 +27,11 @@ type Event struct {
 	// Уровень события в стеке выполнения
 	StackLevel string
 
-	// Путь к файлу источнику события
-	SourceFile string
-	// Указывается начало и конец байтов в файле для события
-	// [0] - начало заголовка
-	// [1] - конец заголовка
-	// [2] - начало свойств события
-	// [3] - конец свойств события
-	BytesRange [4]int
-
 	// Набор свойств события
 	Props map[string]string
-
-	// Исходные данные времени события
-	rawTime []byte
 }
 
-func parseTechData(data []byte) []Event {
+func parseChunkData(data []byte, t time.Time) []Event {
 
 	var reHeaders = regexp.MustCompile(`(?m)(?P<Metadata>[0-9][0-9]:[0-9][0-9].[0-9]+-\d+,\w+,\d,)`)
 	//str := string(data)
@@ -66,17 +53,17 @@ func parseTechData(data []byte) []Event {
 		props := data[endIdx:endProps]
 		//idx := bytes.Index(data, match)
 
-		e := newEvent(header, props)
+		e := newEvent(t, header, props)
 		events = append(events, e)
 
-		pp.Println("event", e)
+		//pp.Println("event", e)
 	}
 
 	return events
 
 }
 
-func newEvent(header []byte, props ...[]byte) Event {
+func newEvent(t time.Time, header []byte, props ...[]byte) Event {
 
 	e := Event{}
 
@@ -86,14 +73,20 @@ func newEvent(header []byte, props ...[]byte) Event {
 	e.StackLevel = string(data[2])
 	e.Type = EventType(data[1])
 
-	t := bytes.Split(data[0], []byte("-"))
+	logTime := bytes.Split(data[0], []byte("-"))
+	min, _ := strconv.ParseInt(string(logTime[0][0:2]), 10, 64)
+	sec, _ := strconv.ParseInt(string(logTime[0][3:5]), 10, 64)
+	nsec, _ := strconv.ParseInt(string(logTime[0][6:]), 10, 64)
 
-	d, _ := strconv.ParseInt(string(t[1]), 64, 10)
+	minutes := int64(time.Minute) * min
+	seconds := int64(time.Second) * sec
+	nseconds := int64(time.Microsecond) * nsec
+	e.EndAt = t.Add(time.Duration(minutes + seconds + nseconds))
 
-	e.rawTime = t[0]
+	d, _ := strconv.ParseInt(string(logTime[1]), 10, 64)
 
 	e.Duration = time.Duration(d)
-
+	e.StartAt = e.EndAt.Add(-e.Duration * time.Millisecond)
 	if len(props) > 0 {
 		e.Props = parseEventProps(props[0])
 	}
