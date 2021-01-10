@@ -121,7 +121,7 @@ func parseEventProps(rawData []byte) map[string]string {
 func replaceGaps(data []byte) []byte {
 	data = bytes.TrimRight(data, ",")
 	data = bytes.TrimSpace(data)
-	regexGaps := regexp.MustCompile("('{1}[\\S\\s]*?'{1})|((\"{1}[\\S\\s]*?\"{1}))")
+	regexGaps := regexp.MustCompile(`(?m)('[\S\s]*?')|("[\S\s]*?")`)
 	gapsStrings := regexGaps.FindAll(data, -1)
 	for _, gapString := range gapsStrings {
 		data = bytes.Replace(data, gapString, bytes.ReplaceAll(gapString, []byte(","), []byte{0x7F}), -1)
