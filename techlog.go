@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +17,7 @@ import (
 type Options func()
 type Events chan Event
 
-var ChunkReaderSize = 4 * 1024
+var DefaultChunkSize = 4 * 1024
 
 func MaxEvents(max int) Options {
 	return func() {
@@ -108,48 +107,81 @@ func (w *Watcher) emmitWriteEvent(event watcher.Event) {
 
 	offset := w.journals[event.Name()]
 
-	newOffset := readLogFile(event.Path, offset, w.e)
+	newOffset, _ := readLogFile(event.Path, offset, w.e)
 
 	w.journals[event.Name()] = newOffset
 
 }
 
-func readLogFile(path string, offset int64, inEvents Events) int64 {
-
-	cr := chunkReader{ChunkReaderSize}
+func readLogFile(path string, offset int64, inEvents Events) (n int64, err error) {
 
 	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
 
 	if err != nil {
-		log.Panicf("emmit write event: open file %s", err)
+		return 0, err
 	}
 	filestats, _ := file.Stat()
 
 	t := getFileDatetime(filestats.Name())
 
+	_, err = file.Seek(offset, io.SeekStart)
+	if err != nil {
+		return
+	}
+
+	n, err = readTechlogData(file, offset, t, inEvents)
+
+	if err != nil {
+		return n, err
+	}
+
+	return offset + n, nil
+}
+
+func readTechlogData(reader io.Reader, offset int64, t time.Time, in Events) (int64, error) {
+
+	var readBytes int64
+
 	wg := &sync.WaitGroup{}
-	eLock := &sync.Mutex{}
+	//eLock := &sync.Mutex{}
+	limitReader := make(chan struct{}, 20)
+
+	cr := NewChunkReader(reader, DefaultChunkSize)
+
 	for {
-		chunk := cr.Read(file, offset)
-		if chunk.size == 0 {
+		limitReader <- struct{}{}
+		data, n, err := cr.Read()
+		if err != nil {
+			if err == io.EOF {
+				<-limitReader
+				break
+			}
+			log.Printf("error reading data <%s>", err)
+			<-limitReader
 			break
 		}
+
 		wg.Add(1)
-		go func(eData []byte) {
-			events := parseChunkData(chunk.data, t)
-			eLock.Lock()
+		go func(d []byte, off int64) {
+			events := parseChunkData(d, t, off)
+			//eLock.Lock()
 			for _, event := range events {
-				inEvents <- event
+				in <- event
 			}
-			eLock.Unlock()
+			//eLock.Unlock()
 			wg.Done()
-		}(chunk.data)
-		offset = chunk.end
+			<-limitReader
+		}(data, offset)
+
+		offset += int64(n)
+		readBytes += int64(n)
+
 	}
 
 	wg.Wait()
 
-	return offset
+	return readBytes, nil
+
 }
 
 func getFileDatetime(name string) time.Time {
@@ -164,57 +196,39 @@ func getFileDatetime(name string) time.Time {
 
 }
 
-type chunkReader struct {
-	chunkSize int
-}
+func ReadSeeker(reader io.ReadSeeker, chunkSize int, offset int64) (data []byte, end int64, err error) {
 
-type chunk struct {
-	data  []byte
-	start int64
-	size  int
-	end   int64
-}
+	end = offset
 
-var reHeaders = regexp.MustCompile(`(?mi)([0-9][0-9]:[0-9][0-9]\.[0-9]+-\d+)`)
-
-func (cr chunkReader) Read(file *os.File, offset int64) chunk {
-
-	//file, _ := os.Open(j.File)
-	//defer file.Close()
-	buf := make([]byte, cr.chunkSize)
-
-	var err error
-	_, err = file.Seek(offset, io.SeekStart)
+	_, err = reader.Seek(offset, io.SeekStart)
 	if err != nil {
-		return chunk{}
+		return
 	}
-	n, _ := file.Read(buf)
+
+	var n int
+
+	buf := make([]byte, chunkSize)
+	n, err = reader.Read(buf)
+
 	if n == 0 {
-		return chunk{}
+		return
 	}
 
-	c := chunk{
-		start: offset,
-		size:  n,
+	if n < chunkSize {
+		data = buf[:n]
+		return data, offset + int64(len(data)), nil
 	}
 
-	if c.size < cr.chunkSize {
-		c.data = buf[:c.size]
-		c.end = c.start + int64(c.size)
-		return c
-	}
-
-	reader := bufio.NewReader(file)
+	r := bufio.NewReader(reader)
 
 	for {
-		txt, err := reader.ReadBytes('\n')
+		txt, err := r.ReadBytes('\n')
 
 		if ok := reHeaders.Match(txt); ok {
 			break
 		}
 
 		buf = append(buf, txt...)
-		c.size += len(txt)
 
 		if err == io.EOF {
 			break
@@ -222,11 +236,151 @@ func (cr chunkReader) Read(file *os.File, offset int64) chunk {
 
 	}
 
-	c.end = c.start + int64(c.size)
-	c.data = buf
+	return buf, offset + int64(len(buf)), nil
 
-	return c
+}
 
+func ReadSeeker2(reader io.ReadSeeker, chunkSize int, offset int64) (data []byte, end int64, err error) {
+
+	end = offset
+
+	_, err = reader.Seek(offset, io.SeekStart)
+	if err != nil {
+		return
+	}
+
+	rd := NewChunkReader(reader, DefaultChunkSize)
+
+	data, n, err := rd.Read()
+
+	return data, offset + int64(n), err
+
+}
+
+func ReadChunk(reader io.Reader, chunkSize int, offset int64) (data []byte, end int64, err error) {
+
+	end = offset
+	r := bufio.NewReader(reader)
+
+	_, err = r.Discard(int(offset))
+	if err != nil {
+		return
+	}
+
+	var n int
+
+	buf := make([]byte, chunkSize)
+	n, err = r.Read(buf)
+
+	if n == 0 {
+		return
+	}
+
+	if n < chunkSize {
+		data = buf[:n]
+		return data, offset + int64(len(data)), nil
+	}
+
+	for {
+		txt, err := r.ReadBytes('\n')
+
+		if ok := reHeaders.Match(txt); ok {
+			break
+		}
+
+		buf = append(buf, txt...)
+
+		if err == io.EOF {
+			break
+		}
+
+	}
+
+	return buf, offset + int64(len(buf)), nil
+
+}
+
+type chunkReader struct {
+	rd           *bufio.Reader
+	minChunkSize int
+}
+
+func NewChunkReader(r io.Reader, minChunkSize int) *chunkReader {
+	return &chunkReader{
+		rd:           bufio.NewReader(r),
+		minChunkSize: minChunkSize,
+	}
+}
+
+// Выполняет чтение из редера до ближайшего окончания лога
+func (cr *chunkReader) Read() ([]byte, int, error) {
+
+	buf := make([]byte, cr.minChunkSize)
+
+	n, err := cr.rd.Read(buf)
+	if err != nil {
+		return nil, n, err
+	}
+
+	if n < len(buf) {
+		buf = buf[:n]
+	}
+
+	err = cr.readForNextLog(&buf)
+
+	if err != nil && err != io.EOF {
+		return nil, 0, err
+	}
+
+	return buf, len(buf), err
+
+}
+
+func (cr *chunkReader) readForNextLog(buf *[]byte) error {
+
+	var findBuffer int
+	var n int
+
+	findBuffer = 512
+	maxBufSize := 4096
+	size := 0
+	for {
+		n++
+		peekSize := n * findBuffer
+		fbuf, err := cr.rd.Peek(peekSize)
+		if err != nil {
+			return err
+		}
+
+		idx := reHeaders.FindIndex(fbuf)
+
+		if idx == nil {
+
+			if peekSize >= maxBufSize {
+				add := make([]byte, peekSize)
+				_, err := cr.rd.Read(add)
+				if err != nil {
+					return err
+				}
+				*buf = append(*buf, add...)
+				n = 0
+			}
+
+			continue
+		}
+
+		size = idx[0]
+		break
+	}
+
+	add := make([]byte, size)
+	_, err := cr.rd.Read(add)
+	if err != nil {
+		return err
+	}
+	*buf = append(*buf, add...)
+
+	return nil
 }
 
 // TODO Пока сделал заготовку для функции мониторинга файла
@@ -259,7 +413,7 @@ func StreamReadAt(file string, maxEvents int64, offset int64) (Events, int64, er
 	stream := make(Events, maxEvents)
 
 	go func() {
-		offset = readLogFile(fullPath, offset, stream)
+		offset, err = readLogFile(fullPath, offset, stream)
 		close(stream)
 	}()
 

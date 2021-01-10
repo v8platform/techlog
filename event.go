@@ -2,8 +2,8 @@ package techlog
 
 import (
 	"bytes"
+	"github.com/xelaj/go-dry"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -14,26 +14,55 @@ const (
 	CallType EventType = "CALL"
 )
 
+var regexGaps = regexp.MustCompile(`(?m)('[\S\s]*?')|("[\S\s]*?")`)
+var reHeaders = regexp.MustCompile(`(?m)(?P<Metadata>[0-9][0-9]:[0-9][0-9].[0-9]+-\d+,\w+,\d,)`)
+
 type Event struct {
 
-	// Дата начала события (расчетная, т.к. в журнале есть ктолько окончания)
-	StartAt time.Time
-	// Дата окончания события
-	EndAt time.Time
+	// Дата и время события до часа из даты файла
+	Time time.Time
+
+	// Момент события от даты файла
+	TimeOffset time.Duration
+
+	// Отспут до блока события в файле
+	Offset int64
+
+	// Размер блока события в файле
+	Size int
+
 	// Длительность выполнения в милисикундах
 	Duration time.Duration
+
 	// Тип события
 	Type EventType
+
 	// Уровень события в стеке выполнения
-	StackLevel string
+	StackLevel int
 
 	// Набор свойств события
-	Props map[string]string
+	Properties map[string]string
 }
 
-func parseChunkData(data []byte, t time.Time) []Event {
+// Дата начала события (расчетная, т.к. в журнале есть ктолько окончания)
+func (e Event) StartAt(t ...time.Time) time.Time {
+	return e.EndAt(t...).Add(-e.Duration)
+}
 
-	var reHeaders = regexp.MustCompile(`(?m)(?P<Metadata>[0-9][0-9]:[0-9][0-9].[0-9]+-\d+,\w+,\d,)`)
+// Дата окончания события
+func (e Event) EndAt(t ...time.Time) time.Time {
+
+	tt := e.Time
+
+	if len(t) > 0 {
+		tt = t[0]
+	}
+
+	return tt.Add(e.TimeOffset)
+}
+
+func parseChunkData(data []byte, t time.Time, offset int64) []Event {
+
 	//str := string(data)
 	headersIdx := reHeaders.FindAllIndex(data, -1)
 	max := len(headersIdx)
@@ -51,54 +80,54 @@ func parseChunkData(data []byte, t time.Time) []Event {
 		}
 
 		props := data[endIdx:endProps]
-		//idx := bytes.Index(data, match)
 
-		e := newEvent(t, header, props)
+		off := int64(startIdx) + offset
+
+		e := Event{
+			Time:   t,
+			Offset: off,
+			Size:   len(header) + len(props),
+		}
+		e.TimeOffset, e.Duration, e.Type, e.StackLevel = parseEventHeader(header)
+
+		if len(props) > 0 {
+			e.Properties = parseEventProps(props)
+		}
+
 		events = append(events, e)
 
-		//pp.Println("event", e)
 	}
 
 	return events
 
 }
 
-func newEvent(t time.Time, header []byte, props ...[]byte) Event {
-
-	e := Event{}
+func parseEventHeader(header []byte) (time.Duration, time.Duration, EventType, int) {
 
 	header = bytes.TrimRight(header, ",")
 	data := bytes.Split(header, []byte(","))
 
-	e.StackLevel = string(data[2])
-	e.Type = EventType(data[1])
+	StackLevel := dry.StringToInt(string(data[2]))
+	Type := EventType(data[1])
 
 	logTime := bytes.Split(data[0], []byte("-"))
-	min, _ := strconv.ParseInt(string(logTime[0][0:2]), 10, 64)
-	sec, _ := strconv.ParseInt(string(logTime[0][3:5]), 10, 64)
-	nsec, _ := strconv.ParseInt(string(logTime[0][6:]), 10, 64)
 
-	minutes := int64(time.Minute) * min
-	seconds := int64(time.Second) * sec
-	nseconds := int64(time.Microsecond) * nsec
-	e.EndAt = t.Add(time.Duration(minutes + seconds + nseconds))
+	min := int64(dry.StringToInt(string(logTime[0][0:2]))) * int64(time.Minute)
+	sec := int64(dry.StringToInt(string(logTime[0][3:5]))) * int64(time.Second)
+	nsec := int64(dry.StringToInt(string(logTime[0][6:]))) * int64(time.Microsecond)
 
-	d, _ := strconv.ParseInt(string(logTime[1]), 10, 64)
+	TimeOffset := time.Duration(min + sec + nsec)
+	Duration := time.Duration(dry.StringToInt(string(logTime[1])))
 
-	e.Duration = time.Duration(d)
-	e.StartAt = e.EndAt.Add(-e.Duration * time.Millisecond)
-	if len(props) > 0 {
-		e.Props = parseEventProps(props[0])
-	}
+	return TimeOffset, Duration, Type, StackLevel
 
-	return e
 }
 
 func parseEventProps(rawData []byte) map[string]string {
 
-	props := make(map[string]string)
-
 	p := bytes.Split(replaceGaps(rawData), []byte(","))
+
+	props := make(map[string]string, len(p))
 
 	for _, v := range p {
 		if len(v) == 0 {
@@ -106,6 +135,7 @@ func parseEventProps(rawData []byte) map[string]string {
 		}
 
 		keyValue := bytes.SplitN(v, []byte("="), 2)
+		//dry.PanicIf(len(keyValue) != 2, "error parse props ", string(rawData))
 		key := strings.Replace(string(keyValue[0]), ":", "_", 1)
 
 		value := string(restoreGaps(keyValue[1]))
@@ -121,7 +151,7 @@ func parseEventProps(rawData []byte) map[string]string {
 func replaceGaps(data []byte) []byte {
 	data = bytes.TrimRight(data, ",")
 	data = bytes.TrimSpace(data)
-	regexGaps := regexp.MustCompile(`(?m)('[\S\s]*?')|("[\S\s]*?")`)
+
 	gapsStrings := regexGaps.FindAll(data, -1)
 	for _, gapString := range gapsStrings {
 		data = bytes.Replace(data, gapString, bytes.ReplaceAll(gapString, []byte(","), []byte{0x7F}), -1)

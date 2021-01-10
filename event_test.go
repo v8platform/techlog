@@ -22,7 +22,7 @@ func Test_parseTechData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseChunkData(tt.args.data, time.Now()); !reflect.DeepEqual(got, tt.want) {
+			if got := parseChunkData(tt.args.data, time.Now(), 0); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("parseTechData() = %v, want %v", got, tt.want)
 			}
 		})
