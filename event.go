@@ -41,7 +41,7 @@ type Event struct {
 	StackLevel int
 
 	// Набор свойств события
-	Properties map[string]string
+	Properties map[string]string `json:"properties,inherit"`
 }
 
 // Дата начала события (расчетная, т.к. в журнале есть ктолько окончания)

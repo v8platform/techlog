@@ -124,11 +124,12 @@ func readLogFile(path string, offset int64, inEvents Events) (n int64, err error
 
 	t := getFileDatetime(filestats.Name())
 
-	_, err = file.Seek(offset, io.SeekStart)
-	if err != nil {
-		return
+	if offset > 0 {
+		_, err = file.Seek(offset, io.SeekStart)
+		if err != nil {
+			return
+		}
 	}
-
 	n, err = readTechlogData(file, offset, t, inEvents)
 
 	if err != nil {
@@ -151,12 +152,16 @@ func readTechlogData(reader io.Reader, offset int64, t time.Time, in Events) (in
 	for {
 		limitReader <- struct{}{}
 		data, n, err := cr.Read()
-		if err != nil {
-			if err == io.EOF {
-				<-limitReader
-				break
-			}
+
+		switch err {
+		case nil, io.EOF:
+			//
+		default:
 			log.Printf("error reading data <%s>", err)
+			<-limitReader
+			break
+		}
+		if n == 0 {
 			<-limitReader
 			break
 		}

@@ -1,6 +1,7 @@
 package techlog
 
 import (
+	"encoding/json"
 	"github.com/k0kubun/pp"
 	"testing"
 )
@@ -82,7 +83,7 @@ func TestRead(t *testing.T) {
 		{
 			"simple",
 			args{
-				file: "./log/18100509.log",
+				file: "./log/18100509_simple.log",
 			},
 			false,
 		},
@@ -95,7 +96,10 @@ func TestRead(t *testing.T) {
 				return
 			}
 
+			d, _ := json.Marshal(got)
+
 			pp.Println("events count", len(got))
+			pp.Println("events json", d)
 
 		})
 	}
