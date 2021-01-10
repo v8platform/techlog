@@ -196,110 +196,6 @@ func getFileDatetime(name string) time.Time {
 
 }
 
-func ReadSeeker(reader io.ReadSeeker, chunkSize int, offset int64) (data []byte, end int64, err error) {
-
-	end = offset
-
-	_, err = reader.Seek(offset, io.SeekStart)
-	if err != nil {
-		return
-	}
-
-	var n int
-
-	buf := make([]byte, chunkSize)
-	n, err = reader.Read(buf)
-
-	if n == 0 {
-		return
-	}
-
-	if n < chunkSize {
-		data = buf[:n]
-		return data, offset + int64(len(data)), nil
-	}
-
-	r := bufio.NewReader(reader)
-
-	for {
-		txt, err := r.ReadBytes('\n')
-
-		if ok := reHeaders.Match(txt); ok {
-			break
-		}
-
-		buf = append(buf, txt...)
-
-		if err == io.EOF {
-			break
-		}
-
-	}
-
-	return buf, offset + int64(len(buf)), nil
-
-}
-
-func ReadSeeker2(reader io.ReadSeeker, chunkSize int, offset int64) (data []byte, end int64, err error) {
-
-	end = offset
-
-	_, err = reader.Seek(offset, io.SeekStart)
-	if err != nil {
-		return
-	}
-
-	rd := NewChunkReader(reader, DefaultChunkSize)
-
-	data, n, err := rd.Read()
-
-	return data, offset + int64(n), err
-
-}
-
-func ReadChunk(reader io.Reader, chunkSize int, offset int64) (data []byte, end int64, err error) {
-
-	end = offset
-	r := bufio.NewReader(reader)
-
-	_, err = r.Discard(int(offset))
-	if err != nil {
-		return
-	}
-
-	var n int
-
-	buf := make([]byte, chunkSize)
-	n, err = r.Read(buf)
-
-	if n == 0 {
-		return
-	}
-
-	if n < chunkSize {
-		data = buf[:n]
-		return data, offset + int64(len(data)), nil
-	}
-
-	for {
-		txt, err := r.ReadBytes('\n')
-
-		if ok := reHeaders.Match(txt); ok {
-			break
-		}
-
-		buf = append(buf, txt...)
-
-		if err == io.EOF {
-			break
-		}
-
-	}
-
-	return buf, offset + int64(len(buf)), nil
-
-}
-
 type chunkReader struct {
 	rd           *bufio.Reader
 	minChunkSize int
@@ -403,30 +299,32 @@ func StreamRead(file string, maxEvents int64) (Events, error) {
 
 }
 
-func StreamReadAt(file string, maxEvents int64, offset int64) (Events, int64, error) {
+func StreamReadAt(file string, maxEvents int64, offset int64) (Events, *int64, error) {
 
 	fullPath, err := filepath.Abs(file)
 	if err != nil {
-		return nil, offset, err
+		return nil, &offset, err
 	}
+
+	off := &offset
 
 	stream := make(Events, maxEvents)
 
 	go func() {
-		offset, err = readLogFile(fullPath, offset, stream)
+		*off, err = readLogFile(fullPath, offset, stream)
 		close(stream)
 	}()
 
-	return stream, offset, nil
+	return stream, off, nil
 
 }
 
-func ReadAt(file string, offset int64) ([]Event, int64, error) {
+func ReadAt(file string, offset int64) ([]Event, *int64, error) {
 
-	stream, offset, err := StreamReadAt(file, 50, offset)
+	stream, off, err := StreamReadAt(file, 50, offset)
 
 	if err != nil {
-		return nil, offset, err
+		return nil, &offset, err
 	}
 
 	var events []Event
@@ -435,7 +333,7 @@ func ReadAt(file string, offset int64) ([]Event, int64, error) {
 		events = append(events, event)
 	}
 
-	return events, offset, nil
+	return events, off, nil
 
 }
 
