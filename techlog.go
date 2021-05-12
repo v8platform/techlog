@@ -1,7 +1,6 @@
 package techlog
 
 import (
-	"bufio"
 	"context"
 	"github.com/radovskyb/watcher"
 	"github.com/xelaj/go-dry"
@@ -10,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+	reader2 "v8platform/techlog/reader"
 )
 
 type Options func()
@@ -143,49 +142,58 @@ func readTechlogData(reader io.Reader, offset int64, t time.Time, in Events) (in
 
 	var readBytes int64
 
-	wg := &sync.WaitGroup{}
+	//wg := &sync.WaitGroup{}
 	//eLock := &sync.Mutex{}
-	limitReader := make(chan struct{}, 20)
+	//limitReader := make(chan struct{}, 1)
 
-	cr := NewChunkReader(reader, DefaultChunkSize)
+	cr := reader2.NewChunkReader(reader, DefaultChunkSize)
 
 	for {
-		limitReader <- struct{}{}
+		//limitReader <- struct{}{}
 		data, n, err := cr.Read()
 
-		switch err {
-		case nil, io.EOF:
-			//
-		default:
-			log.Printf("error reading data <%s>", err)
-			<-limitReader
-			break
-		}
-		if n == 0 {
-			<-limitReader
-			break
+		if err != nil && err != io.EOF {
+			readBytes += int64(n)
+			return readBytes, err
 		}
 
-		wg.Add(1)
-		go func(d []byte, off int64) {
-			events := parseChunkData(d, t, off)
-			//eLock.Lock()
-			for _, event := range events {
-				in <- event
-			}
-			//eLock.Unlock()
-			wg.Done()
-			<-limitReader
-		}(data, offset)
+		//switch err {
+		//case nil, io.EOF:
+		//	//
+		//default:
+		//	log.Printf("error reading data <%s>", err)
+		//	//<-limitReader
+		//	break
+		//}
+		//if n == 0 {
+		//	<-limitReader
+		//	break
+		//}
+
+		//wg.Add(1)
+		//go func(d []byte, off int64) {
+		events := parseChunkData(data, t, offset)
+		//eLock.Lock()
+		for _, event := range events {
+			in <- event
+		}
+		//eLock.Unlock()
+		//wg.Done()
+		//<-limitReader
+		//}(data, offset)
 
 		offset += int64(n)
 		readBytes += int64(n)
 
+		if err == io.EOF {
+			return readBytes, err
+		}
+
 	}
 
-	wg.Wait()
+	//wg.Wait()
 
-	return readBytes, nil
+	//return readBytes, nil
 
 }
 
@@ -199,89 +207,6 @@ func getFileDatetime(name string) time.Time {
 	return time.Date(dry.StringToInt(year), time.Month(dry.StringToInt(month)),
 		dry.StringToInt(day), dry.StringToInt(hours), 0, 0, 0, time.Local)
 
-}
-
-type chunkReader struct {
-	rd           *bufio.Reader
-	minChunkSize int
-}
-
-func NewChunkReader(r io.Reader, minChunkSize int) *chunkReader {
-	return &chunkReader{
-		rd:           bufio.NewReader(r),
-		minChunkSize: minChunkSize,
-	}
-}
-
-// Выполняет чтение из редера до ближайшего окончания лога
-func (cr *chunkReader) Read() ([]byte, int, error) {
-
-	buf := make([]byte, cr.minChunkSize)
-
-	n, err := cr.rd.Read(buf)
-	if err != nil {
-		return nil, n, err
-	}
-
-	if n < len(buf) {
-		buf = buf[:n]
-	}
-
-	err = cr.readForNextLog(&buf)
-
-	if err != nil && err != io.EOF {
-		return nil, 0, err
-	}
-
-	return buf, len(buf), err
-
-}
-
-func (cr *chunkReader) readForNextLog(buf *[]byte) error {
-
-	var findBuffer int
-	var n int
-
-	findBuffer = 512
-	maxBufSize := 4096
-	size := 0
-	for {
-		n++
-		peekSize := n * findBuffer
-		fbuf, err := cr.rd.Peek(peekSize)
-		if err != nil {
-			return err
-		}
-
-		idx := reHeaders.FindIndex(fbuf)
-
-		if idx == nil {
-
-			if peekSize >= maxBufSize {
-				add := make([]byte, peekSize)
-				_, err := cr.rd.Read(add)
-				if err != nil {
-					return err
-				}
-				*buf = append(*buf, add...)
-				n = 0
-			}
-
-			continue
-		}
-
-		size = idx[0]
-		break
-	}
-
-	add := make([]byte, size)
-	_, err := cr.rd.Read(add)
-	if err != nil {
-		return err
-	}
-	*buf = append(*buf, add...)
-
-	return nil
 }
 
 // TODO Пока сделал заготовку для функции мониторинга файла

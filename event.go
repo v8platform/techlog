@@ -20,25 +20,25 @@ var reHeaders = regexp.MustCompile(`(?m)(?P<Metadata>[0-9][0-9]:[0-9][0-9].[0-9]
 type Event struct {
 
 	// Дата и время события до часа из даты файла
-	Time time.Time
+	Time time.Time `json:"time"`
 
 	// Момент события от даты файла
-	TimeOffset time.Duration
+	TimeOffset time.Duration `json:"time_offset"`
 
 	// Отступ до блока события в файле
-	Offset int64
+	Offset int64 `json:"offset"`
 
 	// Размер блока события в файле
-	Size int
+	Size int `json:"size"`
 
 	// Длительность выполнения в милисикундах
-	Duration time.Duration
+	Duration time.Duration `json:"duration"`
 
 	// Тип события
-	Type EventType
+	Type EventType `json:"type"`
 
 	// Уровень события в стеке выполнения
-	StackLevel int
+	StackLevel int `json:"stack_level"`
 
 	// Набор свойств события
 	Properties map[string]string `json:"properties,inherit"`

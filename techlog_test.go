@@ -83,7 +83,7 @@ func TestRead(t *testing.T) {
 		{
 			"simple",
 			args{
-				file: "./log/18100509_simple.log",
+				file: "./log/21051221.log",
 			},
 			false,
 		},
@@ -99,7 +99,8 @@ func TestRead(t *testing.T) {
 			d, _ := json.Marshal(got)
 
 			pp.Println("events count", len(got))
-			pp.Println("events json", d)
+			//pp.Println("events json", got)
+			pp.Println("events json", len(d))
 
 		})
 	}
